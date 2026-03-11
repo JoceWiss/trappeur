@@ -3,7 +3,7 @@
 ---
 
 # ***1. VISION DU GAME DESIGN***
-Le jeu simule la vie d'un trappeur indépendant, de sa famille et de ses recrues, naviguant dans la rivalité commerciale entre la **HBC** (Hudson's Bay Company) et la **NWC** (North West Company).
+Le jeu simule la vie d'un trappeur indépendant et de son groupe (famille/recrues), naviguant dans la rivalité commerciale entre la **HBC** (Hudson's Bay Company) et la **NWC** (North West Company).
 
 * **Moteur :** Godot Engine.
 * **Système :** Grille hexagonale tactique.
@@ -12,52 +12,71 @@ Le jeu simule la vie d'un trappeur indépendant, de sa famille et de ses recrues
 ---
 
 # ***2. SPÉCIFICATIONS DE LA GRILLE (HEX-GRID)***
-L'unité de mesure de l'hexagone est le pilier de la simulation.
+L'échelle de l'hexagone est calibrée pour la survie et la navigation tactique.
 
 | Paramètre | Valeur / Type | Justification Technique |
 | :--- | :--- | :--- |
-| **Taille d'un Hex** | **500 mètres** | Équilibre visibilité (FOV) et temps de trajet réaliste. |
-| **Coordonnées** | `Axial` (q, r) | Optimise le pathfinding (A*) et le stockage en mémoire. |
-| **Vitesse de Base** | 8 à 10 Hex / Heure | Basé sur la marche avec charge lourde (4 km/h). |
-| **Attributs par Hex** | `Resource` (.tres) | Biome, humidité, population de castors, influence politique. |
+| **Taille d'un Hex** | **500 mètres** | Équilibre visibilité (FOV) et micro-gestion du terrain. |
+| **Coordonnées** | `Axial` (q, r) | Optimise le pathfinding (A*) sous Godot. |
+| **Vitesse de Base** | 8 hexagones / heure | Basé sur une marche de 4 km/h en terrain plat. |
 
 ---
 
-# ***3. MÉCANIQUES DE SIMULATION***
+# ***3. SYSTÈME DE TEMPS (LOGIQUE DU TOUR)***
+Le jeu utilise une échelle horaire pour renforcer la tension liée à la survie.
+
+* **1 Tour = 1 Heure.**
+* **Cycle Jour/Nuit :** Impacte la visibilité et la température.
+* **Saisonnalité :** Le nombre de tours de "jour" (action sécurisée) varie selon le mois (ex: 16h en été, 8h en hiver).
+* **Actions Temporelles :** * *Déplacement :* 1 tour (distance selon biome).
+    * *Poser des pièges :* 2 tours.
+    * *Établir un campement :* 1 tour.
+    * *Portage :* Très coûteux en tours et en énergie.
+
+---
+
+# ***4. BIOMES ET MÉCANIQUES DE DÉPLACEMENT***
+Le coût total d'entrée dans un hexagone ($C_{total}$) est calculé dynamiquement :
+$$C_{total} = (C_{base} \times M_{saison}) + M_{meteo}$$
+
+| Biome | Coût de Base ($C_{base}$) | Note Historique |
+| :--- | :--- | :--- |
+| **Plaine** | 1.0 | Déplacement facile. |
+| **Forêt Boréale** | 2.5 | Riche en ressources, progression lente. |
+| **Marécage** | 4.0 | Danger élevé, quasi-impraticable hors gel. |
+| **Rivière** | 0.5 (Canoë) | Autoroute fluviale (Navigation). |
+
+---
+
+# ***5. MÉLÉE ÉCONOMIQUE ET SURVIE***
 
 ### ***L'Économie du "Made Beaver" (MB)***
-Tout le système économique repose sur la peau de castor séchée, l'unité de compte historique.
-* **Sur-trappe :** Une variable `float beaver_population` sur chaque hexagone qui diminue à chaque prise. Si elle tombe à 0, l'hexagone est stérile pour 3 cycles (années).
-* **Commerce :** Les prix fluctuent selon la distance du Fort de traite le plus proche et l'allégeance du joueur.
+* Le castor est l'unité de compte. Tout équipement (fusils, poudre, raquettes) s'achète en peaux de castor.
+* **Sur-trappe :** Une variable `beaver_population` diminue sur l'hexagone à chaque prise.
 
-### ***Logistique et Portage***
-Le relief et les saisons dictent le gameplay via des multiplicateurs de coût de mouvement ($PM$) :
-* **Navigation :** Coût de mouvement réduit sur les hexagones "Rivière".
-* **Portage :** Action spécifique augmentant drastiquement la consommation d'énergie pour traverser un hexagone "Terre" avec un canoë.
-
----
-
-# ***4. ALERTES ET ÉQUILIBRAGE***
-
-### ***Risques de Design***
-> [!IMPORTANT]
-> **Alerte Micro-management :** Gérer chaque membre de la famille individuellement sur une grille de 500m est trop lourd.
-> * **Solution :** Utiliser des "Ordres de groupe". La famille suit le trappeur par défaut, sauf lors de l'établissement du campement.
-
-### ***Rigueur Historique***
-* **Saisonnalité :** En hiver, les rivières gèlent. Le canoë devient inutile, les raquettes deviennent indispensables pour maintenir un coût de mouvement décent.
+### ***Météo et Saisons***
+* **Hiver :** Les rivières deviennent des routes de glace (marche possible, canoë impossible).
+* **Raquettes :** Objet indispensable pour annuler le malus de mouvement sur la neige.
+* **Énergie :** Chaque tour consomme des calories. Le froid multiplie cette consommation.
 
 ---
 
-# ***5. ARCHITECTURE GODOT SUGGÉRÉE***
-
-Pour tes scripts, structure tes hexagones comme des objets `Resource` pour optimiser la mémoire :
+# ***6. ARCHITECTURE GODOT SUGGÉRÉE***
 
 ```gdscript
-# Exemple de structure de donnée pour un Hexagone (hex_data.gd)
+# hex_data.gd
 class_name HexData extends Resource
 
 @export var biome_type: String = "Forest"
+@export var base_friction: float = 2.5
+@export var beaver_population: float = 100.0
 @export var has_river: bool = false
-@export var beaver_density: float = 1.0 # De 0.0 à 1.0
-@export var owner_company: String = "None" # "HBC" or "NWC"
+
+# time_manager.gd
+var current_hour: int = 8
+var season: String = "Autumn"
+
+func end_turn(action_cost: int):
+    current_hour += action_cost
+    if current_hour >= 24:
+        # Logique de changement de jour
